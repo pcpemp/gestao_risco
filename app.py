@@ -90,39 +90,29 @@ def get_data(tickers, start_date, end_date):
     except Exception: return pd.DataFrame()
 
 def apply_fee(returns_series, annual_fee_pct):
-    """Aplica taxa de administração como provisão diária"""
     if annual_fee_pct == 0: return returns_series
     daily_factor = (1 - annual_fee_pct/100.0) ** (1/252)
     net_returns = (1 + returns_series) * daily_factor - 1
     return net_returns
 
 def calculate_portfolio_series_with_rebalancing(weights_dict, df_returns, rf_daily, rebal_freq):
-    """
-    Calcula a série de retornos do portfólio considerando a frequência de rebalanceamento.
-    rebal_freq: 'D' (Diário), 'M' (Mensal), 'Q' (Trimestral), '6M' (Semestral), 'Y' (Anual), 'None' (Hold)
-    """
     df_calc = df_returns.copy()
     df_calc['CAIXA'] = rf_daily
-    
     w_target = pd.Series(weights_dict)
     w_target['CAIXA'] = 1.0 - w_target.sum()
     w_target = w_target.reindex(df_calc.columns).fillna(0.0)
     
-    if rebal_freq == 'D':
-        return df_calc.dot(w_target)
+    if rebal_freq == 'D': return df_calc.dot(w_target)
     
     if rebal_freq == 'None':
-        # Buy & Hold
         cum_returns = (1 + df_calc).cumprod()
         portfolio_idx = cum_returns.dot(w_target)
         portfolio_daily_ret = portfolio_idx.pct_change().fillna(0.0)
         portfolio_daily_ret.iloc[0] = df_calc.iloc[0].dot(w_target) 
         return portfolio_daily_ret
 
-    # Rebalanceamento Periódico
     freq_map = {'M': 'ME', 'Q': 'QE', '6M': '6ME', 'Y': 'YE'}
     period_alias = freq_map.get(rebal_freq, 'ME')
-    
     groups = df_calc.groupby(pd.Grouper(freq=period_alias))
     portfolio_rets = []
     
@@ -134,16 +124,12 @@ def calculate_portfolio_series_with_rebalancing(weights_dict, df_returns, rf_dai
         ret_local.iloc[0] = block.iloc[0].dot(w_target)
         portfolio_rets.append(ret_local)
         
-    if not portfolio_rets:
-        return pd.Series(0.0, index=df_calc.index)
-        
+    if not portfolio_rets: return pd.Series(0.0, index=df_calc.index)
     return pd.concat(portfolio_rets)
 
 def calculate_portfolio_metrics(weights_dict, returns_df, benchmark_returns, risk_free_rate, annual_fee=0.0, rebal_freq='D'):
-    
     keys = ['ret_ann', 'vol_ann', 'var_95', 'var_99', 'cvar_95', 'cvar_99', 'beta', 'max_dd', 'sharpe', 'sortino']
-    if returns_df.empty and not weights_dict:
-        return {k: 0.0 for k in keys}
+    if returns_df.empty and not weights_dict: return {k: 0.0 for k in keys}
 
     rf_daily = (1 + risk_free_rate) ** (1/252) - 1
     common_tickers = [t for t in returns_df.columns if t in weights_dict]
@@ -163,15 +149,12 @@ def calculate_portfolio_metrics(weights_dict, returns_df, benchmark_returns, ris
     
     total_return_ann = (1 + portfolio_daily_returns.mean()) ** 252 - 1
     volatility_ann = portfolio_daily_returns.std() * np.sqrt(252)
-    
     var_95 = np.percentile(portfolio_daily_returns, 5) * -1 
     var_99 = np.percentile(portfolio_daily_returns, 1) * -1
-    
     tail_95 = portfolio_daily_returns[portfolio_daily_returns <= -var_95]
     tail_99 = portfolio_daily_returns[portfolio_daily_returns <= -var_99]
     cvar_95 = tail_95.mean() * -1 if not tail_95.empty else var_95
     cvar_99 = tail_99.mean() * -1 if not tail_99.empty else var_99
-
     wealth_index = (1 + portfolio_daily_returns).cumprod()
     peaks = wealth_index.cummax()
     drawdown = (wealth_index - peaks) / peaks
@@ -179,18 +162,14 @@ def calculate_portfolio_metrics(weights_dict, returns_df, benchmark_returns, ris
 
     beta = 0.0
     if not benchmark_returns.empty:
-        if benchmark_returns.std() == 0:
-            beta = 0.0
+        if benchmark_returns.std() == 0: beta = 0.0
         else:
             combined = pd.concat([portfolio_daily_returns, benchmark_returns], axis=1).dropna()
             if not combined.empty:
                 cov_matrix = np.cov(combined.iloc[:, 0], combined.iloc[:, 1])
-                cov_pb = cov_matrix[0, 1]
-                var_b = cov_matrix[1, 1]
-                beta = cov_pb / var_b if var_b != 0 else 0.0
+                beta = cov_matrix[0, 1] / cov_matrix[1, 1]
 
     sharpe = (total_return_ann - risk_free_rate) / volatility_ann if volatility_ann > 0 else 0.0
-    
     neg_ret = portfolio_daily_returns[portfolio_daily_returns < 0]
     downside_std = neg_ret.std() * np.sqrt(252)
     sortino = (total_return_ann - risk_free_rate) / downside_std if downside_std > 0 else 0.0
@@ -199,8 +178,7 @@ def calculate_portfolio_metrics(weights_dict, returns_df, benchmark_returns, ris
         'ret_ann': total_return_ann, 'vol_ann': volatility_ann,
         'var_95': var_95, 'var_99': var_99,
         'cvar_95': cvar_95, 'cvar_99': cvar_99,
-        'max_dd': max_dd, 'beta': beta,
-        'sharpe': sharpe, 'sortino': sortino,
+        'max_dd': max_dd, 'beta': beta, 'sharpe': sharpe, 'sortino': sortino,
         'series': portfolio_daily_returns
     }
 
@@ -220,14 +198,12 @@ with st.sidebar:
     start_date = datetime.now() - timedelta(days=days_map[periodo])
     
     rf_input = st.number_input("Taxa Livre de Risco (Anual %)", value=st.session_state.rf_default, step=0.1) / 100.0
-    
     bench_options = {"Ibovespa (B3)": "^BVSP", "S&P 500 (EUA - em Reais)": "^GSPC", "CDI (Taxa Livre de Risco)": "CDI"}
     selected_bench_label = st.selectbox("Benchmark Comparativo", list(bench_options.keys()))
     bench_ticker_value = bench_options[selected_bench_label]
 
     st.markdown("---")
     
-    # --- CUSTOS E REBALANCEAMENTO ---
     with st.expander("Custos & Rebalanceamento", expanded=True):
         st.caption("Taxa de Administração (Anual %)")
         col_fee1, col_fee2 = st.columns(2)
@@ -235,25 +211,14 @@ with st.sidebar:
         fee_sim = col_fee2.number_input("Tx. Sim.", 0.0, 20.0, 0.0, step=0.1)
         
         st.caption("Frequência de Rebalanceamento")
-        rebal_opts = {
-            "Diário": "D",
-            "Mensal": "M",
-            "Trimestral": "Q",
-            "Semestral": "6M",
-            "Anual": "Y",
-            "Nunca (Buy & Hold)": "None"
-        }
+        rebal_opts = {"Diário": "D", "Mensal": "M", "Trimestral": "Q", "Semestral": "6M", "Anual": "Y", "Nunca (Buy & Hold)": "None"}
         rebal_keys = list(rebal_opts.keys())
-        # Define índice padrão para "Nunca" (5)
         default_rebal_idx = rebal_keys.index("Nunca (Buy & Hold)")
-        
         col_reb1, col_reb2 = st.columns(2)
         lbl_reb_curr = col_reb1.selectbox("Rebal. Atual", rebal_keys, index=default_rebal_idx)
         lbl_reb_sim = col_reb2.selectbox("Rebal. Sim.", rebal_keys, index=default_rebal_idx)
-        
         reb_curr_val = rebal_opts[lbl_reb_curr]
         reb_sim_val = rebal_opts[lbl_reb_sim]
-    # ------------------------------------
 
     st.markdown("---")
     # CSV
@@ -295,6 +260,17 @@ with st.sidebar:
     if (btn_add or new_ticker) and new_ticker and new_ticker not in st.session_state.tickers:
         st.session_state.tickers.append(new_ticker); st.session_state.weights_curr[new_ticker] = 0.0; st.session_state.weights_sim[new_ticker] = 0.0; st.rerun()
 
+    # --- ANTECIPAR DOWNLOAD PARA VERIFICAR DADOS ---
+    tickers_dl = st.session_state.tickers.copy()
+    real_bench_ticker = None
+    if bench_ticker_value != "CDI":
+        real_bench_ticker = bench_ticker_value
+        if real_bench_ticker not in tickers_dl: tickers_dl.append(real_bench_ticker)
+    
+    # Download aqui para ser usado na sidebar
+    df_all = get_data(tickers_dl, start_date, datetime.now())
+    # ------------------------------------------------
+
     st.markdown("---")
     if st.session_state.tickers:
         st.subheader("Editar Pesos")
@@ -331,7 +307,20 @@ with st.sidebar:
         sum_c, sum_s = 0.0, 0.0; to_remove = []
         for t in st.session_state.tickers:
             r = st.columns([2.5, 2.5, 2.5, 1])
-            with r[0]: st.markdown(f"<span style='font-size:0.9em'>{t}</span>", unsafe_allow_html=True)
+            with r[0]: 
+                # --- VERIFICAÇÃO DE HISTÓRICO ---
+                label_html = f"<span style='font-size:0.9em'>{t}</span>"
+                if t in df_all.columns:
+                    first_idx = df_all[t].first_valid_index()
+                    # Tolerância de 20 dias para considerar histórico completo
+                    if first_idx and (first_idx - pd.to_datetime(start_date).replace(tzinfo=None)).days > 20:
+                        label_html += " <span style='color:#FFC107; font-size:0.8em; cursor:help' title='Dados parciais: O histórico deste ativo é menor que o período selecionado.'>⚠️</span>"
+                elif not df_all.empty: # Se df não está vazio mas não tem a coluna, falhou o download desse ativo
+                     label_html += " <span style='color:#F44336; font-size:0.8em; cursor:help' title='Erro: Dados não encontrados.'>🚫</span>"
+                
+                st.markdown(label_html, unsafe_allow_html=True)
+                # --------------------------------
+
             with r[1]: v = st.number_input(f"c_{t}", 0.0, 100.0, step=1.0, value=st.session_state.weights_curr.get(t,0.0), label_visibility="collapsed"); st.session_state.weights_curr[t]=v; sum_c+=v
             with r[2]: v = st.number_input(f"s_{t}", 0.0, 100.0, step=1.0, value=st.session_state.weights_sim.get(t,0.0), label_visibility="collapsed"); st.session_state.weights_sim[t]=v; sum_s+=v
             with r[3]: 
@@ -352,13 +341,6 @@ with st.sidebar:
 # ==========================================
 # ÁREA PRINCIPAL
 # ==========================================
-tickers_dl = st.session_state.tickers.copy()
-real_bench_ticker = None
-if bench_ticker_value != "CDI":
-    real_bench_ticker = bench_ticker_value
-    if real_bench_ticker not in tickers_dl: tickers_dl.append(real_bench_ticker)
-
-df_all = get_data(tickers_dl, start_date, datetime.now())
 
 if not st.session_state.tickers:
     st.info("👈 Adicione ativos na barra lateral.")
@@ -415,6 +397,11 @@ else:
         t1, t2, t3, t4 = st.tabs(["Fronteira Eficiente", "Matriz de Correlação", "Drawdown Histórico", "Retorno Acumulado"])
         valid_cols = [c for c in df_returns.columns if c in st.session_state.tickers]
         
+        def get_series(w_map, df, rf):
+            ws = pd.Series({t: w_map.get(t,0) for t in df.columns}); w_st = ws.sum(); w_ca = 1.0 - w_st
+            rf_d = (1+rf)**(1/252)-1
+            return df.dot(ws) + (w_ca * rf_d)
+
         with t1:
             if valid_cols:
                 dfa = df_returns[valid_cols]
