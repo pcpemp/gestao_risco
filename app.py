@@ -101,57 +101,37 @@ def calculate_portfolio_series_with_rebalancing(weights_dict, df_returns, rf_dai
     Calcula a série de retornos do portfólio considerando a frequência de rebalanceamento.
     rebal_freq: 'D' (Diário), 'M' (Mensal), 'Q' (Trimestral), '6M' (Semestral), 'Y' (Anual), 'None' (Hold)
     """
-    # Preparar dados: Incluir o ativo "CAIXA" no DataFrame de retornos para vetorização
     df_calc = df_returns.copy()
     df_calc['CAIXA'] = rf_daily
     
-    # Preparar vetor de pesos alvo
     w_target = pd.Series(weights_dict)
-    # Adicionar peso do caixa
     w_target['CAIXA'] = 1.0 - w_target.sum()
-    
-    # Reordenar w_target para bater com colunas de df_calc
     w_target = w_target.reindex(df_calc.columns).fillna(0.0)
     
-    # Se for rebalanceamento DIÁRIO, usa cálculo vetorial simples (mais rápido)
     if rebal_freq == 'D':
         return df_calc.dot(w_target)
     
-    # Se for Periódico ou Buy & Hold
     if rebal_freq == 'None':
-        # Buy & Hold: Calcula retorno acumulado de cada ativo, pondera pelo peso inicial
-        # Valor Portfólio = Somatorio (Peso_i * RetornoAcum_i)
+        # Buy & Hold
         cum_returns = (1 + df_calc).cumprod()
         portfolio_idx = cum_returns.dot(w_target)
         portfolio_daily_ret = portfolio_idx.pct_change().fillna(0.0)
-        # O primeiro dia do pct_change é NaN/0, mas precisamos do retorno do primeiro dia real
-        # Aproximação: portfolio_daily_ret.iloc[0] = df_calc.iloc[0].dot(w_target)
         portfolio_daily_ret.iloc[0] = df_calc.iloc[0].dot(w_target) 
         return portfolio_daily_ret
 
-    # Rebalanceamento Periódico (M, Q, 6M, Y)
-    # Estratégia: Agrupar por período, calcular buy&hold dentro do período, resetar pesos no início do prox.
-    
-    freq_map = {'M': 'ME', 'Q': 'QE', '6M': '6ME', 'Y': 'YE'} # Pandas aliases
+    # Rebalanceamento Periódico
+    freq_map = {'M': 'ME', 'Q': 'QE', '6M': '6ME', 'Y': 'YE'}
     period_alias = freq_map.get(rebal_freq, 'ME')
     
-    # Criar grupos baseados nas datas
     groups = df_calc.groupby(pd.Grouper(freq=period_alias))
-    
     portfolio_rets = []
     
     for _, block in groups:
         if block.empty: continue
-        # Dentro do bloco é Buy & Hold
-        # 1. Acumulado local
         cum_local = (1 + block).cumprod()
-        # 2. Valor da carteira no bloco (base 1.0 no inicio do bloco)
         val_local = cum_local.dot(w_target)
-        # 3. Retornos diários desse valor
         ret_local = val_local.pct_change().fillna(0.0)
-        # Ajuste do primeiro dia do bloco (que o pct_change zera)
         ret_local.iloc[0] = block.iloc[0].dot(w_target)
-        
         portfolio_rets.append(ret_local)
         
     if not portfolio_rets:
@@ -161,36 +141,26 @@ def calculate_portfolio_series_with_rebalancing(weights_dict, df_returns, rf_dai
 
 def calculate_portfolio_metrics(weights_dict, returns_df, benchmark_returns, risk_free_rate, annual_fee=0.0, rebal_freq='D'):
     
-    # Inicializa
     keys = ['ret_ann', 'vol_ann', 'var_95', 'var_99', 'cvar_95', 'cvar_99', 'beta', 'max_dd', 'sharpe', 'sortino']
     if returns_df.empty and not weights_dict:
         return {k: 0.0 for k in keys}
 
     rf_daily = (1 + risk_free_rate) ** (1/252) - 1
-    
-    # Verifica se há ativos selecionados
     common_tickers = [t for t in returns_df.columns if t in weights_dict]
     
-    # Se não houver ações, é 100% caixa
     if not common_tickers:
-        # Série de caixa puro com taxa
         dates = returns_df.index if not returns_df.empty else pd.date_range(end=datetime.now(), periods=252)
         s_rf = pd.Series(rf_daily, index=dates)
         s_net = apply_fee(s_rf, annual_fee)
         ret_ann = (1 + s_net.mean())**252 - 1
         return {k: 0.0 if k != 'ret_ann' else ret_ann for k in keys}
 
-    # Calcula a série temporal correta considerando o rebalanceamento
-    # Filtra DF apenas com tickers relevantes
     df_active = returns_df[common_tickers]
     weights_active = {k: v for k,v in weights_dict.items() if k in common_tickers}
     
     gross_daily_returns = calculate_portfolio_series_with_rebalancing(weights_active, df_active, rf_daily, rebal_freq)
-    
-    # Aplica taxa
     portfolio_daily_returns = apply_fee(gross_daily_returns, annual_fee)
     
-    # Cálculo das Métricas
     total_return_ann = (1 + portfolio_daily_returns.mean()) ** 252 - 1
     volatility_ann = portfolio_daily_returns.std() * np.sqrt(252)
     
@@ -231,7 +201,7 @@ def calculate_portfolio_metrics(weights_dict, returns_df, benchmark_returns, ris
         'cvar_95': cvar_95, 'cvar_99': cvar_99,
         'max_dd': max_dd, 'beta': beta,
         'sharpe': sharpe, 'sortino': sortino,
-        'series': portfolio_daily_returns # Retorna a série para os gráficos
+        'series': portfolio_daily_returns
     }
 
 # --- INICIALIZAÇÃO ---
@@ -266,17 +236,20 @@ with st.sidebar:
         
         st.caption("Frequência de Rebalanceamento")
         rebal_opts = {
-            "Diário (Padrão)": "D",
+            "Diário": "D",
             "Mensal": "M",
             "Trimestral": "Q",
             "Semestral": "6M",
             "Anual": "Y",
             "Nunca (Buy & Hold)": "None"
         }
+        rebal_keys = list(rebal_opts.keys())
+        # Define índice padrão para "Nunca" (5)
+        default_rebal_idx = rebal_keys.index("Nunca (Buy & Hold)")
         
         col_reb1, col_reb2 = st.columns(2)
-        lbl_reb_curr = col_reb1.selectbox("Rebal. Atual", list(rebal_opts.keys()), index=0)
-        lbl_reb_sim = col_reb2.selectbox("Rebal. Sim.", list(rebal_opts.keys()), index=0)
+        lbl_reb_curr = col_reb1.selectbox("Rebal. Atual", rebal_keys, index=default_rebal_idx)
+        lbl_reb_sim = col_reb2.selectbox("Rebal. Sim.", rebal_keys, index=default_rebal_idx)
         
         reb_curr_val = rebal_opts[lbl_reb_curr]
         reb_sim_val = rebal_opts[lbl_reb_sim]
@@ -415,7 +388,6 @@ else:
     fw_c = {k: v/100.0 for k, v in st.session_state.weights_curr.items()}
     fw_s = {k: v/100.0 for k, v in st.session_state.weights_sim.items()}
 
-    # CALCULAR MÉTRICAS E SÉRIES
     mc = calculate_portfolio_metrics(fw_c, df_returns, bench_returns, rf_input, fee_curr, reb_curr_val)
     ms = calculate_portfolio_metrics(fw_s, df_returns, bench_returns, rf_input, fee_sim, reb_sim_val)
 
@@ -503,7 +475,6 @@ else:
 
         with t3:
             if valid_cols:
-                # Usar a série JÁ calculada na função de métricas
                 sc = mc['series']; ss = ms['series']
                 def calc_dd(s): w=(1+s).cumprod(); return (w-w.cummax())/w.cummax()
                 dc = calc_dd(sc); ds = calc_dd(ss)
