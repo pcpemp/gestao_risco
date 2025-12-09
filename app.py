@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
+import requests
 from datetime import datetime, timedelta
 import io
 
@@ -56,6 +57,20 @@ st.markdown("""
 # --- FUNÇÕES ---
 
 @st.cache_data
+def get_selic_bcb():
+    """Busca a taxa Selic (Série 4389) na API do Banco Central do Brasil."""
+    try:
+        # Série 4389: Taxa de juros - Selic acumulada no mês anualizada base 252
+        url = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.4389/dados/ultimos/1?formato=json"
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            return float(data[0]['valor'])
+        return 10.50 # Fallback seguro
+    except Exception:
+        return 10.50 # Fallback seguro
+
+@st.cache_data
 def get_data(tickers, start_date, end_date):
     if not tickers: return pd.DataFrame()
     tickers_to_fetch = list(set(tickers + ['BRL=X']))
@@ -79,14 +94,14 @@ def get_data(tickers, start_date, end_date):
 
 def calculate_portfolio_metrics(weights_dict, returns_df, benchmark_returns, risk_free_rate=0.105):
     if returns_df.empty:
-        keys = ['ret_ann', 'vol_ann', 'var_95', 'var_99', 'cvar_95', 'cvar_99', 'beta', 'max_dd']
+        keys = ['ret_ann', 'vol_ann', 'var_95', 'var_99', 'cvar_95', 'cvar_99', 'beta', 'max_dd', 'sharpe', 'sortino']
         return {k: 0.0 for k in keys}
 
     common_tickers = [t for t in returns_df.columns if t in weights_dict]
     rf_daily = (1 + risk_free_rate) ** (1/252) - 1
 
     if not common_tickers:
-        keys = ['ret_ann', 'vol_ann', 'var_95', 'var_99', 'cvar_95', 'cvar_99', 'beta', 'max_dd']
+        keys = ['ret_ann', 'vol_ann', 'var_95', 'var_99', 'cvar_95', 'cvar_99', 'beta', 'max_dd', 'sharpe', 'sortino']
         res = {k: 0.0 for k in keys}
         res['ret_ann'] = risk_free_rate
         return res
@@ -128,17 +143,28 @@ def calculate_portfolio_metrics(weights_dict, returns_df, benchmark_returns, ris
                 var_b = cov_matrix[1, 1]
                 beta = cov_pb / var_b if var_b != 0 else 0.0
 
+    sharpe = (total_return_ann - risk_free_rate) / volatility_ann if volatility_ann > 0 else 0.0
+    
+    neg_ret = portfolio_daily_returns[portfolio_daily_returns < 0]
+    downside_std = neg_ret.std() * np.sqrt(252)
+    sortino = (total_return_ann - risk_free_rate) / downside_std if downside_std > 0 else 0.0
+
     return {
         'ret_ann': total_return_ann, 'vol_ann': volatility_ann,
         'var_95': var_95, 'var_99': var_99,
         'cvar_95': cvar_95, 'cvar_99': cvar_99,
-        'max_dd': max_dd, 'beta': beta
+        'max_dd': max_dd, 'beta': beta,
+        'sharpe': sharpe, 'sortino': sortino
     }
 
 # --- INICIALIZAÇÃO ---
 if 'tickers' not in st.session_state: st.session_state.tickers = [] 
 if 'weights_curr' not in st.session_state: st.session_state.weights_curr = {}
 if 'weights_sim' not in st.session_state: st.session_state.weights_sim = {}
+
+# Inicializa Taxa Livre de Risco com dados do BCB
+if 'rf_default' not in st.session_state:
+    st.session_state.rf_default = get_selic_bcb()
 
 # ==========================================
 # SIDEBAR
@@ -149,7 +175,12 @@ with st.sidebar:
     days_map = {"Últimos 1 Ano": 365, "Últimos 2 Anos": 730, "Últimos 5 Anos": 1825, "Últimos 10 Anos": 3650}
     start_date = datetime.now() - timedelta(days=days_map[periodo])
     
-    rf_input = st.number_input("Taxa Livre de Risco (Anual %)", value=10.5, step=0.1) / 100.0
+    rf_input = st.number_input(
+        "Taxa Livre de Risco (Anual %)", 
+        value=st.session_state.rf_default, 
+        step=0.1,
+        help=f"Série BCB 4389: {st.session_state.rf_default}%"
+    ) / 100.0
     
     bench_options = {
         "Ibovespa (B3)": "^BVSP",
@@ -326,6 +357,7 @@ else:
         else: cb.metric("Beta Atual", f"{ms['beta']:.2f}", f"{ms['beta']-mc['beta']:+.2f}", delta_color="inverse")
         cd.metric("Máximo Drawdown", f"{ms['max_dd']:.2%}", f"{(ms['max_dd']-mc['max_dd'])*100:+.2f} p.p.", delta_color="inverse")
 
+        d_card("Sharpe Ratio", mc['sharpe'], ms['sharpe'], "Sortino Ratio", mc['sortino'], ms['sortino'], False, False)
         d_card("VaR 95% (1D)", mc['var_95'], ms['var_95'], "VaR 99% (1D)", mc['var_99'], ms['var_99'])
         d_card("CVaR 95%", mc['cvar_95'], ms['cvar_95'], "CVaR 99%", mc['cvar_99'], ms['cvar_99'])
 
@@ -337,9 +369,6 @@ else:
             ws = pd.Series({t: w_map.get(t,0) for t in df.columns}); w_st = ws.sum(); w_ca = 1.0 - w_st
             rf_d = (1+rf)**(1/252)-1
             return df.dot(ws) + (w_ca * rf_d)
-
-        sc = get_series(fw_c, df_returns[valid_cols], rf_input)
-        ss = get_series(fw_s, df_returns[valid_cols], rf_input)
 
         with t1:
             if valid_cols:
@@ -360,8 +389,6 @@ else:
                         rand_r.append(p_ret); rand_v.append(p_vol)
                 
                 fig = go.Figure()
-                
-                # CML + Benchmark
                 if not bench_returns.empty:
                     b_ret_geo = (1 + bench_returns.mean()) ** 252 - 1
                     b_vol_ann = bench_returns.std() * np.sqrt(252)
@@ -372,27 +399,13 @@ else:
                         fig.add_trace(go.Scatter(x=[0, max_x * 100], y=[rf_input * 100, end_y * 100], mode='lines', line=dict(color='#888', dash='dot', width=1), name='CML'))
                         fig.add_trace(go.Scatter(x=[b_vol_ann * 100], y=[b_ret_geo * 100], mode='markers+text', text=[selected_bench_label], textposition="bottom right", marker=dict(symbol='diamond', size=10, color='purple'), name='Benchmark'))
 
-                # SHARPE RATIO LINES (0.5, 1, 2, 3)
                 sharpes = [0.5, 1.0, 2.0, 3.0]
                 max_vol_plot = max(rand_v) if rand_v else 0.4
                 max_vol_plot = max(max_vol_plot, 0.4) * 1.2
-                
                 for s in sharpes:
                     y_end = rf_input + (s * max_vol_plot)
-                    fig.add_trace(go.Scatter(
-                        x=[0, max_vol_plot * 100],
-                        y=[rf_input * 100, y_end * 100],
-                        mode='lines',
-                        line=dict(color='rgba(200,200,200,0.5)', width=1, dash='dashdot'),
-                        name=f'Sharpe {s}',
-                        hoverinfo='skip'
-                    ))
-                    # Rótulo da linha
-                    fig.add_annotation(
-                        x=max_vol_plot*100, y=y_end*100,
-                        text=f"S={s}", showarrow=False,
-                        font=dict(size=10, color="gray"), xanchor="left"
-                    )
+                    fig.add_trace(go.Scatter(x=[0, max_vol_plot * 100], y=[rf_input * 100, y_end * 100], mode='lines', line=dict(color='rgba(200,200,200,0.5)', width=1, dash='dashdot'), name=f'Sharpe {s}', hoverinfo='skip'))
+                    fig.add_annotation(x=max_vol_plot*100, y=y_end*100, text=f"S={s}", showarrow=False, font=dict(size=10, color="gray"), xanchor="left")
 
                 if rand_v: fig.add_trace(go.Scatter(x=np.array(rand_v)*100, y=np.array(rand_r)*100, mode='markers', marker=dict(color='#999', size=3, opacity=0.2), name='Simulações', hoverinfo='none'))
 
@@ -417,6 +430,7 @@ else:
 
         with t3:
             if valid_cols:
+                sc = get_series(fw_c, df_returns[valid_cols], rf_input); ss = get_series(fw_s, df_returns[valid_cols], rf_input)
                 def calc_dd(s): w=(1+s).cumprod(); return (w-w.cummax())/w.cummax()
                 dc = calc_dd(sc); ds = calc_dd(ss)
                 fd = go.Figure()
@@ -428,6 +442,7 @@ else:
 
         with t4:
             if valid_cols:
+                sc = get_series(fw_c, df_returns[valid_cols], rf_input); ss = get_series(fw_s, df_returns[valid_cols], rf_input)
                 cc = 100*(1+sc).cumprod(); cs = 100*(1+ss).cumprod()
                 fr = go.Figure()
                 if not bench_returns.empty: cb = 100*(1+bench_returns).cumprod(); fr.add_trace(go.Scatter(x=cb.index, y=cb, mode='lines', name=selected_bench_label, line=dict(color='#555', width=1.5, dash='dash')))
