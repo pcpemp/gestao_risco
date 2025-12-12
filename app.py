@@ -286,6 +286,7 @@ with st.sidebar:
                 if len(st.session_state.tickers)>0:
                     for t in st.session_state.tickers: st.session_state.weights_sim[t] = 100.0/len(st.session_state.tickers)
                     st.rerun()
+            st.caption("Iguala o peso de todos os ativos do portfólio (desconsiderando o caixa).")
             st.divider()
             c_cx1, c_cx2 = st.columns(2)
             with c_cx1:
@@ -304,6 +305,7 @@ with st.sidebar:
                         f = (100.0 - tc_s) / cs
                         for t in st.session_state.tickers: st.session_state.weights_sim[t] *= f
                     st.rerun()
+            st.caption("Redistribui o peso atual dos ativos do portfólio (mantendo sua proporção), considerando o caixa desejado.")
 
         cols = st.columns([2.5, 2.5, 2.5, 1]); cols[0].markdown("**ATIVO**"); cols[1].markdown("**ATUAL**"); cols[2].markdown("**SIM.**")
         sum_c, sum_s = 0.0, 0.0; to_remove = []
