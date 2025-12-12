@@ -194,7 +194,7 @@ if 'rf_default' not in st.session_state: st.session_state.rf_default = get_selic
 with st.sidebar:
     st.header("Configurações")
     periodo = st.selectbox("Janela Histórica", ["Último 1 Ano", "Últimos 2 Anos", "Últimos 5 Anos", "Últimos 10 Anos"])
-    days_map = {"Últimos 1 Ano": 365, "Últimos 2 Anos": 730, "Últimos 5 Anos": 1825, "Últimos 10 Anos": 3650}
+    days_map = {"Último 1 Ano": 365, "Últimos 2 Anos": 730, "Últimos 5 Anos": 1825, "Últimos 10 Anos": 3650}
     start_date = datetime.now() - timedelta(days=days_map[periodo])
     
     rf_input = st.number_input("Taxa Livre de Risco (Anual %)", value=st.session_state.rf_default, step=0.1) / 100.0
