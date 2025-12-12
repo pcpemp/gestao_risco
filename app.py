@@ -255,7 +255,7 @@ with st.sidebar:
 
     st.markdown("---")
     c1, c2 = st.columns([3, 1])
-    with c1: new_ticker = st.text_input("Ticker", placeholder="ex: AAPL", label_visibility="collapsed").upper().strip()
+    with c1: new_ticker = st.text_input("Ticker", placeholder="ex: AAPL", label_visibility="collapsed", width='stretch').upper().strip()
     with c2: btn_add = st.button("➕")
     st.caption("ℹ️ Para ativos no Brasil, escreva **.SA** após o código (ex: VALE3.SA).")
 
@@ -278,11 +278,11 @@ with st.sidebar:
         st.subheader("Editar Pesos")
         with st.expander("Ferramentas", expanded=False):
             c_eq1, c_eq2 = st.columns(2)
-            if c_eq1.button("⚖️ Igualar Atual"):
+            if c_eq1.button("⚖️ Igualar Atual", width='stretch'):
                 if len(st.session_state.tickers)>0:
                     for t in st.session_state.tickers: st.session_state.weights_curr[t] = 100.0/len(st.session_state.tickers)
                     st.rerun()
-            if c_eq2.button("⚖️ Igualar Sim."):
+            if c_eq2.button("⚖️ Igualar Sim.", width='stretch'):
                 if len(st.session_state.tickers)>0:
                     for t in st.session_state.tickers: st.session_state.weights_sim[t] = 100.0/len(st.session_state.tickers)
                     st.rerun()
@@ -290,7 +290,7 @@ with st.sidebar:
             c_cx1, c_cx2 = st.columns(2)
             with c_cx1:
                 tc_c = st.number_input("Cx Meta (At.)", 0.0, 100.0, 0.0, key="tg_c")
-                if st.button("Aplicar (A)"):
+                if st.button("Aplicar Atual", width='stretch'):
                     cs = sum(st.session_state.weights_curr.values())
                     if cs > 0:
                         f = (100.0 - tc_c) / cs
@@ -298,7 +298,7 @@ with st.sidebar:
                     st.rerun()
             with c_cx2:
                 tc_s = st.number_input("Cx Meta (Si.)", 0.0, 100.0, 0.0, key="tg_s")
-                if st.button("Aplicar (S)"):
+                if st.button("Aplicar Sim.", width='stretch'):
                     cs = sum(st.session_state.weights_sim.values())
                     if cs > 0:
                         f = (100.0 - tc_s) / cs
