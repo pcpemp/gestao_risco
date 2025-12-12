@@ -257,6 +257,8 @@ with st.sidebar:
     c1, c2 = st.columns([3, 1])
     with c1: new_ticker = st.text_input("Ticker", placeholder="ex: AAPL", label_visibility="collapsed").upper().strip()
     with c2: btn_add = st.button("➕")
+    st.caption("ℹ️ Para ativos no Brasil, escreva **.SA** após o código (ex: VALE3.SA).")
+
     if (btn_add or new_ticker) and new_ticker and new_ticker not in st.session_state.tickers:
         st.session_state.tickers.append(new_ticker); st.session_state.weights_curr[new_ticker] = 0.0; st.session_state.weights_sim[new_ticker] = 0.0; st.rerun()
 
